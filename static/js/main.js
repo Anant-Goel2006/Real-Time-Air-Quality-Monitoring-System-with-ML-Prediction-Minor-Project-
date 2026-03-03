@@ -30,6 +30,7 @@ const css = (k,v) => document.documentElement.style.setProperty(k,v);
 const fmtAqi = v => Math.round(v);
 
 let curCity = 'delhi', curLiveData = null;
+let curCityDisplay = 'Delhi';
 let trendChartInst = null, donutChartInst = null, forecastChartInst = null;
 let aqiMap = null, mapMarkers = [], markerCluster = null;
 let heroActiveLayer = 'primary', heroLoadedImage = '', heroUpdateSeq = 0;
@@ -298,6 +299,28 @@ function parseAqiNumber(rawVal) {
   return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
+function isUidQuery(raw) {
+  return /^@?\d+$/.test(String(raw || '').trim());
+}
+
+function normalizeDisplayName(raw) {
+  const cleaned = cleanPlaceToken(String(raw || '').trim());
+  if (!cleaned || isUidQuery(cleaned)) return '';
+  return titleCaseWords(cleaned);
+}
+
+function normalizeLoadCityInput(input) {
+  if (input && typeof input === 'object') {
+    const query = String(input.query ?? input.city ?? '').trim();
+    const displayName = normalizeDisplayName(input.displayName ?? input.label ?? '');
+    return { query, displayName };
+  }
+  return {
+    query: String(input || '').trim(),
+    displayName: '',
+  };
+}
+
 function resolveLiveAqi(data, fallbackValue = null) {
   const direct = parseAqiNumber(data?.aqi);
   if (Number.isFinite(direct)) return direct;
@@ -370,12 +393,12 @@ function renderAreaAqiList(rows, centerName = '') {
 
   listEl.innerHTML = items.map(item => {
     const cat = getCat(item.aqi);
-    const primary = item.area || item.city || titleCaseWords(curCity);
+    const primary = item.area || item.city || normalizeDisplayName(curCityDisplay || curCity) || titleCaseWords(curCity);
     const secondaryParts = [];
     if (item.city && normalizeCityKey(item.city) !== normalizeCityKey(primary)) secondaryParts.push(item.city);
     if (item.country) secondaryParts.push(item.country);
     const secondary = secondaryParts.join(', ') || item.station;
-    return `<button class="area-aqi-chip" data-uid="${escapeHtml(item.uid)}" data-station="${escapeHtml(item.station)}" title="${escapeHtml(item.station)}">
+    return `<button class="area-aqi-chip" data-uid="${escapeHtml(item.uid)}" data-station="${escapeHtml(item.station)}" data-display="${escapeHtml(primary)}" title="${escapeHtml(item.station)}">
       <span class="area-aqi-badge" style="background:${cat.color};color:${cat.textClr}">${Math.round(item.aqi)}</span>
       <span class="area-aqi-text">
         <span class="area-aqi-primary">${escapeHtml(primary)}</span>
@@ -388,11 +411,12 @@ function renderAreaAqiList(rows, centerName = '') {
     btn.addEventListener('click', () => {
       const uid = String(btn.dataset.uid || '').trim();
       const station = String(btn.dataset.station || '').trim();
+      const displayName = normalizeDisplayName(btn.dataset.display || station);
       if (uid) {
-        loadCity(`@${uid}`);
+        loadCity({ query: `@${uid}`, displayName });
         return;
       }
-      if (station) loadCity(station);
+      if (station) loadCity({ query: station, displayName });
     });
   });
 }
@@ -653,7 +677,11 @@ async function updateCinematicHero({ cityName, country, aqi, level, updatedAt, t
   const cat = getCat(safeAqi);
   const parsedCity = parseCityCountry(cityName, curCity);
   const displayCity = parsedCity.city;
-  const displayCountry = (country && country !== '—') ? country : parsedCity.country;
+  const rawCountry = String(country || '').trim();
+  const parsedCountry = String(parsedCity.country || '').trim();
+  const displayCountry = (rawCountry && rawCountry !== '—')
+    ? rawCountry
+    : ((parsedCountry && parsedCountry !== '—') ? parsedCountry : displayCity);
 
   const cityLabel = $('heroCityLabel');
   const countryLabel = $('heroCountryLabel');
@@ -662,7 +690,7 @@ async function updateCinematicHero({ cityName, country, aqi, level, updatedAt, t
   const updatedLabel = $('heroUpdatedTime');
 
   if (cityLabel) cityLabel.textContent = displayCity;
-  if (countryLabel) countryLabel.textContent = displayCountry || '—';
+  if (countryLabel) countryLabel.textContent = displayCountry || displayCity;
   if (badge) {
     badge.textContent = Number.isFinite(parsedAqi) ? `AQI ${fmtAqi(parsedAqi)}` : 'AQI —';
     badge.style.background = cat.color + 'dc';
@@ -756,7 +784,10 @@ async function loadLiveFromCoords(lat, lng, modeLabel = 'your location') {
     if (nearby?.status === 'ok' && nearby?.data) {
       const uid = String(nearby?.nearest?.uid ?? '').replace(/[^\d]/g, '');
       const stationName = nearby?.nearest?.station_name || nearby?.data?.city?.name || '';
-      await loadCity(uid ? `@${uid}` : (stationName || `geo:${latStr};${lngStr}`));
+      await loadCity({
+        query: uid ? `@${uid}` : (stationName || `geo:${latStr};${lngStr}`),
+        displayName: normalizeDisplayName(stationName),
+      });
       const stationLat = Number(nearby?.nearest?.lat ?? nearby?.data?.city?.geo?.[0]);
       const stationLng = Number(nearby?.nearest?.lng ?? nearby?.data?.city?.geo?.[1]);
       if (aqiMap && Number.isFinite(stationLat) && Number.isFinite(stationLng)) {
@@ -1020,7 +1051,10 @@ async function doSearch(q) {
       item.addEventListener('click', () => {
         const uid = String(item.dataset.uid || '').trim();
         const stationName = String(item.dataset.name || '').trim();
-        loadCity(uid ? `@${uid}` : stationName);
+        loadCity({
+          query: uid ? `@${uid}` : stationName,
+          displayName: normalizeDisplayName(stationName),
+        });
         searchDropdown.classList.remove('show');
         if (searchInput) searchInput.value = '';
       });
@@ -1033,13 +1067,20 @@ async function doSearch(q) {
 }
 
 /* ── Load city ──────────────────────────────────────────── */
-async function loadCity(city) {
-  console.log('loadCity()', city);
+async function loadCity(cityInput) {
+  const { query: city, displayName } = normalizeLoadCityInput(cityInput);
+  if (!city) return;
+  console.log('loadCity()', city, displayName || '');
   const reqSeq = ++cityLoadSeq;
+  const previewName = displayName || normalizeDisplayName(isUidQuery(city) ? curCityDisplay : city) || city;
   curCity = city;
-  setActiveCityChip(city);
-  // Always move visuals to selected city immediately, even if live data fails.
-  applySelectedCityVisual(city, reqSeq);
+  curCityDisplay = normalizeDisplayName(previewName) || curCityDisplay || city;
+  setActiveCityChip(previewName);
+  // Avoid optimistic hero repaint for station/UID loads to prevent flicker.
+  const shouldOptimisticVisual = !displayName && !isUidQuery(city);
+  if (shouldOptimisticVisual) {
+    applySelectedCityVisual(previewName, reqSeq);
+  }
   loadAreaAqiList(city, reqSeq);
   try {
     const j = await fetchJsonNoCache(`/api/live/${encodeURIComponent(city)}`);
@@ -1058,7 +1099,11 @@ async function loadCity(city) {
     }
     curTimeIso = j.data?.time?.iso || '';
     $('aqiUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-    renderHero(j.data, reqSeq);
+    if (!displayName) {
+      const liveLabel = normalizeDisplayName(j?.data?.city?.name || '');
+      if (liveLabel) curCityDisplay = liveLabel;
+    }
+    renderHero(j.data, reqSeq, displayName || curCityDisplay || previewName);
     const liveLat = Number(j.data?.city?.geo?.[0]);
     const liveLng = Number(j.data?.city?.geo?.[1]);
     if (aqiMap && Number.isFinite(liveLat) && Number.isFinite(liveLng)) {
@@ -1067,7 +1112,6 @@ async function loadCity(city) {
     renderForecast(j.data.forecast, Number.isFinite(resolvedAqi) ? resolvedAqi : 0);
     loadDonut();
     loadNlpAdvice(j.data, reqSeq);
-    loadAreaAqiList(j?.data?.city?.name || city, reqSeq);
   } catch (e) {
     console.error('loadCity() error', e);
     // Live API unavailable — use local CSV data
@@ -1095,7 +1139,7 @@ async function loadLocalAqi(cityOverride = null, reqSeq = null) {
     if (d.error) {
       stabilityLog('Local AQI fallback unavailable', { cityToLoad, error: d.error });
       toast('Live data unavailable. Showing selected city visual only.', 'info');
-      applySelectedCityVisual(cityToLoad, reqSeq);
+      applySelectedCityVisual(curCityDisplay || cityToLoad, reqSeq);
       return;
     }
     // Ignore fallback payloads that do not match the requested city.
@@ -1103,7 +1147,7 @@ async function loadLocalAqi(cityOverride = null, reqSeq = null) {
       if (!isRequestedCityMatch(cityToLoad, d.city)) {
         console.warn('Ignoring mismatched /api/current-aqi payload', { cityToLoad, returnedCity: d.city });
         stabilityLog('Rejected mismatched fallback payload', { requested: cityToLoad, returned: d.city });
-        applySelectedCityVisual(cityToLoad, reqSeq);
+        applySelectedCityVisual(curCityDisplay || cityToLoad, reqSeq);
         return;
       }
     }
@@ -1136,6 +1180,8 @@ async function loadLocalAqi(cityOverride = null, reqSeq = null) {
       aqiMap.setView([fbLat, fbLng], Math.max(aqiMap.getZoom(), 9));
     }
     $('aqiUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    const fallbackLabel = normalizeDisplayName(d.city || cityToLoad);
+    if (fallbackLabel) curCityDisplay = fallbackLabel;
     updateHeroUI(d.city, d.country, aqi, cat, d.description, reqSeq);
     updatePollutants(d.pollutants, d.city);
     updateWeather(d.weather);
@@ -1149,12 +1195,13 @@ async function loadLocalAqi(cityOverride = null, reqSeq = null) {
 }
 
 /* ── Render hero ────────────────────────────────────────── */
-function renderHero(data, reqSeq = null) {
+function renderHero(data, reqSeq = null, displayNameHint = '') {
   const aqi = resolveLiveAqi(data, getDisplayedAqiFallback()) ?? getDisplayedAqiFallback();
   const cat = getCat(aqi);
   const loc = parseCityCountry(data.city?.name || curCity, curCity);
+  const hintedCity = normalizeDisplayName(displayNameHint);
   curTimeIso = data?.time?.iso || curTimeIso || '';
-  updateHeroUI(loc.city, loc.country, aqi, cat, cat.text || '', reqSeq);
+  updateHeroUI(hintedCity || loc.city, loc.country, aqi, cat, cat.text || '', reqSeq);
 
   const iaqi = data.iaqi || {};
   updatePollutantsFromIaqi(iaqi, data.dominentpol);
@@ -1171,7 +1218,8 @@ function updateHeroUI(cityName, country, aqi, cat, desc, reqSeq = null) {
   // Header card
   $('aqiHeroCard').style.borderTopColor = cat.color;
   $('aqiCityName').textContent = cityName;
-  $('aqiCityCountry').textContent = country;
+  const countryText = String(country || '').trim();
+  $('aqiCityCountry').textContent = (countryText && countryText !== '—') ? countryText : cityName;
 
   // Gauge
   $('gaugeValue').textContent = aqi;
