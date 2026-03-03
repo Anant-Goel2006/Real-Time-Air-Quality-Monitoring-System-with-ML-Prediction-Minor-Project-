@@ -25,7 +25,7 @@
       "focalPoint": "center"
     },
     "chennai": {
-      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/25/Sunset_seen_from_Marina_Beach_5.JPG/3840px-Sunset_seen_from_Marina_Beach_5.JPG",
+      "imageUrl": "/static/assets/hero/cities/chennai.webp",
       "focalPoint": "center"
     },
     "beijing": {

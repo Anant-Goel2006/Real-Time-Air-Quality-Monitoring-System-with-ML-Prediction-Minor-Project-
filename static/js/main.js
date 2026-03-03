@@ -105,7 +105,7 @@ const LOCAL_CITY_FALLBACK = {
   bengaluru: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f4/Vidhana_Soudha_LE.jpg/3840px-Vidhana_Soudha_LE.jpg',
   kolkata: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/32/Howrah_Bridge_Evening.jpg/3840px-Howrah_Bridge_Evening.jpg',
   hyderabad: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Charminar_at_night_%28JUNE_2019%29_2.jpg/3840px-Charminar_at_night_%28JUNE_2019%29_2.jpg',
-  chennai: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/25/Sunset_seen_from_Marina_Beach_5.JPG/3840px-Sunset_seen_from_Marina_Beach_5.JPG',
+  chennai: '/static/assets/hero/cities/chennai.webp',
   beijing: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/Southeast_corner_tower_of_Forbidden_City_and_Beijing_eastern_skyline_%2820241127133425%29.jpg/3840px-Southeast_corner_tower_of_Forbidden_City_and_Beijing_eastern_skyline_%2820241127133425%29.jpg',
   shanghai: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Pudong_night_skyline_viewed_from_the_Bund_in_Shanghai_%2841199899084%29.jpg/3840px-Pudong_night_skyline_viewed_from_the_Bund_in_Shanghai_%2841199899084%29.jpg',
   london: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Big_Ben_at_Night_from_The_London_Eye%2C_2012-12-28.jpg/3840px-Big_Ben_at_Night_from_The_London_Eye%2C_2012-12-28.jpg',
@@ -124,6 +124,8 @@ const FORCED_HERO_IMAGE_OVERRIDES = {
 
 const CITY_BG_ALIASES = {
   bangalore: 'bengaluru',
+  chenai: 'chennai',
+  madras: 'chennai',
   'new-york-city': 'new-york',
   apris: 'paris',
   nyc: 'new-york',
