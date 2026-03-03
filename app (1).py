@@ -699,31 +699,44 @@ def initialize():
     print("  Initializing Air Quality Dashboard")
     print("="*60)
 
-    csv_path = os.path.join(os.path.dirname(__file__), "globalAirQuality.csv")
-    if os.path.exists(csv_path):
+    def first_existing_path(candidates):
+        for path in candidates:
+            if path and os.path.exists(path):
+                return path
+        return ""
+
+    base_dir = os.path.dirname(__file__)
+    csv_path = first_existing_path([
+        os.path.join(base_dir, "globalAirQuality.csv"),
+        os.path.join(base_dir, "Sample_Dataset", "globalAirQuality.csv"),
+    ])
+    if csv_path:
         try:
             df = pd.read_csv(csv_path)
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             print(f"✓ Dataset: {len(df):,} records | {df['city'].nunique()} cities")
+            print(f"✓ Dataset path: {csv_path}")
         except Exception as e:
             print(f"✗ Dataset error: {e}"); df = None
     else:
-        print("✗ globalAirQuality.csv not found — run generate_sample_data.py")
+        print("✗ globalAirQuality.csv not found in project root or Sample_Dataset/")
 
     try:
         import joblib
-        base = os.path.dirname(__file__)
         for fname, var_name in [
             ("aqi_model_random_forest.pkl", "model"),
             ("aqi_scaler.pkl",              "scaler"),
             ("aqi_encoders.pkl",            "encoders"),
         ]:
-            path = os.path.join(base, fname)
-            if os.path.exists(path):
+            path = first_existing_path([
+                os.path.join(base_dir, fname),
+                os.path.join(base_dir, "ML-Model", fname),
+            ])
+            if path:
                 globals()[var_name] = joblib.load(path)
-                print(f"✓ Loaded: {fname}")
+                print(f"✓ Loaded: {fname} ({path})")
             else:
-                print(f"⚠ Missing: {fname}")
+                print(f"⚠ Missing: {fname} (checked root + ML-Model/)")
     except Exception as e:
         print(f"⚠ ML models unavailable: {e}")
 
@@ -795,7 +808,7 @@ def resolve_best_live_payload(raw_query):
             best_status = code
 
     for candidate in candidates:
-        payload, code = fetch_feed(candidate)
+        payload, code = fetch_feed(candidate, timeout=6)
         if is_valid_feed_payload(payload):
             source = "alias" if candidate != input_query else "direct"
             return with_resolved_meta(payload, input_query, normalized_query, source), 200
@@ -804,7 +817,7 @@ def resolve_best_live_payload(raw_query):
     if normalized_query.startswith("@") and re.fullmatch(r"@\d+", normalized_query):
         return error_result("direct")
 
-    search_payload, search_code = fetch_search(normalized_query or input_query)
+    search_payload, search_code = fetch_search(normalized_query or input_query, timeout=5)
     if not isinstance(search_payload, dict):
         return error_result("direct")
     if str(search_payload.get("status", "")).lower() != "ok":
@@ -816,17 +829,17 @@ def resolve_best_live_payload(raw_query):
     ranked = rank_search_candidates(search_payload, normalized_query or input_query)
     if not ranked:
         return error_result("search_name")
-    for item in ranked[:20]:
+    for item in ranked[:10]:
         uid = item.get("uid")
         station = item.get("station") or {}
         station_name = normalize_query_text(station.get("name", ""))
         if uid is not None:
-            payload, code = fetch_feed(f"@{uid}")
+            payload, code = fetch_feed(f"@{uid}", timeout=6)
             if is_valid_feed_payload(payload):
                 return with_resolved_meta(payload, input_query, normalized_query, "search_uid", matched_uid=uid), 200
             capture_error(payload, code)
         if station_name:
-            payload, code = fetch_feed(station_name)
+            payload, code = fetch_feed(station_name, timeout=6)
             if is_valid_feed_payload(payload):
                 return with_resolved_meta(payload, input_query, normalized_query, "search_name", matched_uid=uid), 200
             capture_error(payload, code)
@@ -1061,10 +1074,75 @@ def api_status():
         "timestamp":    datetime.now().isoformat(),
     })
 
+def build_current_aqi_from_live_payload(live_payload, requested_city=""):
+    """Map a WAQI feed payload into the /api/current-aqi response shape."""
+    if not is_valid_feed_payload(live_payload):
+        return None
+
+    data = live_payload.get("data") if isinstance(live_payload, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    aqi_val = parse_aqi_value(data.get("aqi"))
+    if aqi_val is None:
+        return None
+    cat = get_category(int(max(0, round(float(aqi_val)))))
+
+    city_meta = data.get("city") if isinstance(data.get("city"), dict) else {}
+    station_name = str(city_meta.get("name") or requested_city).strip()
+    loc = location_from_station_name(station_name, fallback=requested_city)
+    city_name = str(loc.get("city") or requested_city or station_name).strip() or "Unknown"
+    country_name = str(loc.get("country") or "").strip()
+
+    geo = city_meta.get("geo") if isinstance(city_meta, dict) else None
+    lat = lng = None
+    if isinstance(geo, (list, tuple)) and len(geo) >= 2:
+        try:
+            lat = float(geo[0])
+            lng = float(geo[1])
+        except Exception:
+            lat = lng = None
+
+    iaqi = data.get("iaqi") if isinstance(data.get("iaqi"), dict) else {}
+    def iaqi_value(key):
+        node = iaqi.get(key)
+        if isinstance(node, dict):
+            return parse_aqi_value(node.get("v"))
+        return parse_aqi_value(node)
+
+    time_meta = data.get("time") if isinstance(data.get("time"), dict) else {}
+    timestamp = str(time_meta.get("s") or time_meta.get("iso") or "").strip()
+    if not timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    return {
+        "aqi": float(aqi_val),
+        "category": cat["level"],
+        "color": cat["color"],
+        "bg": cat["bg"],
+        "description": cat["text"],
+        "city": city_name,
+        "country": country_name,
+        "latitude": lat,
+        "longitude": lng,
+        "timestamp": timestamp,
+        "pollutants": {
+            "pm25": iaqi_value("pm25"),
+            "pm10": iaqi_value("pm10"),
+            "no2": iaqi_value("no2"),
+            "so2": iaqi_value("so2"),
+            "o3": iaqi_value("o3"),
+            "co": iaqi_value("co"),
+        },
+        "weather": {
+            "temperature": iaqi_value("t"),
+            "humidity": iaqi_value("h"),
+            "wind_speed": iaqi_value("w"),
+        },
+    }
+
 @app.route("/api/current-aqi")
 def current_aqi():
-    if df is None:
-        return jsonify({"error":"No data — run generate_sample_data.py"}), 404
     try:
         def norm_city(raw):
             txt = str(raw or "").lower().strip()
@@ -1079,7 +1157,18 @@ def current_aqi():
             }
             return aliases.get(txt, txt)
 
-        city_q = norm_city(request.args.get("city"))
+        raw_city = normalize_query_text(request.args.get("city"))
+        city_q = norm_city(raw_city)
+
+        if df is None:
+            live_query = raw_city or "delhi"
+            live_payload, live_code = resolve_best_live_payload(live_query)
+            live_row = build_current_aqi_from_live_payload(live_payload, requested_city=live_query)
+            if live_row:
+                return jsonify(live_row)
+            msg = live_payload.get("data") if isinstance(live_payload, dict) else "Live fallback failed"
+            return jsonify({"error": f"No data — CSV missing and live fallback failed: {msg}"}), live_code or 404
+
         city_series = (
             df["city"]
             .astype(str)
@@ -1094,6 +1183,11 @@ def current_aqi():
             dcity = df[city_series == city_q]
             if dcity.empty:
                 dcity = df[city_series.str.contains(city_q, regex=False, na=False)]
+            if dcity.empty and raw_city:
+                live_payload, _ = resolve_best_live_payload(raw_city)
+                live_row = build_current_aqi_from_live_payload(live_payload, requested_city=raw_city)
+                if live_row:
+                    return jsonify(live_row)
             if not dcity.empty:
                 latest = dcity.sort_values("timestamp").iloc[-1]
             # If city not found, fall back to latest global record instead of error
@@ -1360,4 +1454,3 @@ if __name__ == "__main__":
     print(f"🧩 Build TS: {APP_BUILD_TS}")
     print(f"🔗 WAQI API: {WAQI_BASE_URL}  ← correct https://\n")
     app.run(debug=FLASK_DEBUG, use_reloader=False, host="0.0.0.0", port=FLASK_PORT)
-#complete

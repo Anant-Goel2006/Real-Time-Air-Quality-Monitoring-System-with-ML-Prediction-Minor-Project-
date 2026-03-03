@@ -80,7 +80,7 @@ const LOCAL_CITY_FALLBACK = {
   delhi: '/static/assets/hero/cities/delhi.webp',
   mumbai: '/static/assets/hero/cities/mumbai.webp',
   bengaluru: '/static/assets/hero/cities/bengaluru.webp',
-  kolkata: 'https://images.unsplash.com/photo-1677307816181-1446ab18913e?auto=format&fit=crop&w=3840&q=80',
+  kolkata: 'https://images.unsplash.com/photo-1536421469767-80559bb6f5e1?auto=format&fit=crop&w=3840&q=80',
   hyderabad: '/static/assets/hero/cities/hyderabad.webp',
   chennai: '/static/assets/hero/cities/chennai.webp',
   beijing: '/static/assets/hero/cities/beijing.webp',
@@ -90,11 +90,11 @@ const LOCAL_CITY_FALLBACK = {
   tokyo: '/static/assets/hero/cities/tokyo.webp',
   singapore: '/static/assets/hero/cities/singapore.webp',
   sydney: '/static/assets/hero/cities/sydney.webp',
-  paris: 'https://images.unsplash.com/photo-1764564133113-b9f40c9d1a1a?auto=format&fit=crop&w=3840&q=80',
+  paris: 'https://images.unsplash.com/photo-1431274172761-fca41d930114?auto=format&fit=crop&w=3840&q=80',
 };
 const FORCED_HERO_IMAGE_OVERRIDES = {
-  kolkata: 'https://images.unsplash.com/photo-1677307816181-1446ab18913e?auto=format&fit=crop&w=3840&q=80',
-  paris: 'https://images.unsplash.com/photo-1764564133113-b9f40c9d1a1a?auto=format&fit=crop&w=3840&q=80',
+  kolkata: 'https://images.unsplash.com/photo-1536421469767-80559bb6f5e1?auto=format&fit=crop&w=3840&q=80',
+  paris: 'https://images.unsplash.com/photo-1431274172761-fca41d930114?auto=format&fit=crop&w=3840&q=80',
 };
 
 const CITY_BG_ALIASES = {
@@ -293,6 +293,30 @@ function parseMapStationLocation(rawName, fallbackCity = '') {
   };
 }
 
+function parseAqiNumber(rawVal) {
+  const parsed = Number.parseFloat(rawVal);
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+function resolveLiveAqi(data, fallbackValue = null) {
+  const direct = parseAqiNumber(data?.aqi);
+  if (Number.isFinite(direct)) return direct;
+
+  const iaqi = data?.iaqi || {};
+  const dominant = String(data?.dominentpol || '').toLowerCase().trim();
+  const keys = [dominant, 'pm25', 'pm10', 'o3', 'no2', 'so2', 'co'];
+  const seen = new Set();
+  for (const key of keys) {
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const node = iaqi?.[key];
+    const raw = (node && typeof node === 'object') ? node.v : node;
+    const parsed = parseAqiNumber(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.isFinite(fallbackValue) ? fallbackValue : null;
+}
+
 function escapeHtml(raw) {
   return String(raw || '')
     .replace(/&/g, '&amp;')
@@ -435,9 +459,14 @@ function resolveCountryKey(countryName) {
   return COUNTRY_ALIASES[raw] || raw;
 }
 
-async function resolveHeroBg(cityName, countryName) {
+async function resolveHeroBg(cityName, countryName, queryHint = '') {
   const manifest = await loadHeroManifest();
-  const cityKey = resolveCityKey(cityName);
+  const cityKeyCandidates = [
+    resolveCityKey(cityName),
+    resolveCityKey(queryHint),
+    resolveCityKey(parseCityCountry(queryHint, queryHint).city),
+  ].filter(Boolean);
+  const cityKey = cityKeyCandidates[0] || '';
   const countryKey = resolveCountryKey(countryName);
 
   if (cityKey && FORCED_HERO_IMAGE_OVERRIDES[cityKey]) {
@@ -449,7 +478,7 @@ async function resolveHeroBg(cityName, countryName) {
   }
   if (countryKey && manifest?.countries?.[countryKey]?.imageUrl) return manifest.countries[countryKey];
   if (manifest?.default?.imageUrl) return manifest.default;
-  const remoteSeed = cityKey || countryKey || slugifyCity(cityName) || slugifyCity(countryName);
+  const remoteSeed = cityKey || countryKey || slugifyCity(queryHint) || slugifyCity(cityName) || slugifyCity(countryName);
   if (remoteSeed) {
     return {
       imageUrl: `${REMOTE_BG_BASE}/aqi-${encodeURIComponent(remoteSeed)}/3840/2160`,
@@ -650,7 +679,7 @@ async function updateCinematicHero({ cityName, country, aqi, level, updatedAt, t
   updateHeroTint(cat);
 
   const mySeq = ++heroUpdateSeq;
-  const bgCfg = await resolveHeroBg(displayCity, displayCountry);
+  const bgCfg = await resolveHeroBg(displayCity, displayCountry, curCity);
   if (isStaleReq(reqSeq)) return;
   let imageUrl = await preloadBackgroundImage(bgCfg.imageUrl);
   let focalPoint = bgCfg.focalPoint || 'center';
@@ -815,7 +844,7 @@ if (btnLocate) {
 function showLocationAqiPopup(lat, lng, data) {
   try {
     if (!aqiMap) return;
-    const aqi = parseInt(data.aqi) || 0;
+    const aqi = resolveLiveAqi(data, getDisplayedAqiFallback()) ?? getDisplayedAqiFallback();
     const cat = getCat(aqi);
     const stationLat = Number(data.city?.geo?.[0]);
     const stationLng = Number(data.city?.geo?.[1]);
@@ -873,23 +902,75 @@ document.querySelectorAll('.city-chip').forEach(btn => {
 const searchInput = $('globalSearch');
 const searchDropdown = $('searchDropdown');
 let searchTimer = null;
+let searchReqSeq = 0;
+
+function renderSearchState(message, stateClass = '') {
+  if (!searchDropdown) return;
+  const cls = stateClass ? ` ${stateClass}` : '';
+  searchDropdown.innerHTML = `<div class="sd-state${cls}">${escapeHtml(message)}</div>`;
+  searchDropdown.classList.add('show');
+}
+
+function normalizeSearchSuggestion(item, fallbackQuery = '') {
+  const uid = String(item?.uid ?? '').replace(/[^\d]/g, '');
+  const stationNameRaw = String(item?.station?.name || '').trim();
+  if (!stationNameRaw || /^@?\d+$/.test(stationNameRaw)) return null;
+
+  const stationName = cleanPlaceToken(stationNameRaw);
+  if (!stationName) return null;
+
+  const parsed = parseMapStationLocation(stationName, fallbackQuery);
+  const area = titleCaseWords(parsed.area || '');
+  const city = titleCaseWords(parsed.city || '');
+  const country = titleCaseWords(parsed.country || '');
+  const primary = area || city || titleCaseWords(fallbackQuery || curCity);
+
+  const secondaryParts = [];
+  if (city && normalizeCityKey(city) !== normalizeCityKey(primary)) secondaryParts.push(city);
+  if (country && country !== '—') secondaryParts.push(country);
+  const secondary = secondaryParts.join(', ') || stationName;
+
+  const aqi = parseAqiNumber(item?.aqi);
+  return {
+    uid,
+    stationName,
+    primary,
+    secondary,
+    aqi,
+    cat: Number.isFinite(aqi) ? getCat(aqi) : { color: '#9ca3af', textClr: '#fff' },
+  };
+}
 
 if (searchInput) {
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimer);
     const val = searchInput.value.trim();
-    if (!val) { searchDropdown.classList.remove('show'); return; }
+    if (!val) {
+      searchReqSeq++;
+      if (searchDropdown) searchDropdown.classList.remove('show');
+      return;
+    }
     searchTimer = setTimeout(() => doSearch(val), 400);
   });
 
   searchInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       const val = searchInput.value.trim();
-      if (val) { loadCity(val); searchDropdown.classList.remove('show'); searchInput.value = ''; }
+      if (!val) return;
+      const first = searchDropdown?.querySelector('.sd-item');
+      if (first) {
+        first.click();
+      } else {
+        loadCity(val);
+        if (searchDropdown) searchDropdown.classList.remove('show');
+        searchInput.value = '';
+      }
     }
   });
 
   document.addEventListener('click', e => {
+    if (!searchDropdown) return;
     if (!searchInput.contains(e.target) && !searchDropdown.contains(e.target)) {
       searchDropdown.classList.remove('show');
     }
@@ -897,28 +978,58 @@ if (searchInput) {
 }
 
 async function doSearch(q) {
-  try {
-    const j = await fetchJsonNoCache(`/api/live/search/${encodeURIComponent(q)}`);
-    if (j.status !== 'ok' || !j.data?.length) { searchDropdown.classList.remove('show'); return; }
+  if (!searchDropdown) return;
+  const query = String(q || '').trim();
+  if (!query) {
+    searchDropdown.classList.remove('show');
+    return;
+  }
+  const reqSeq = ++searchReqSeq;
+  renderSearchState('Searching live stations…', 'is-loading');
 
-    searchDropdown.innerHTML = j.data.slice(0,6).map(item => {
-      const aqi = item.aqi || '—';
-      const cat = typeof aqi === 'number' ? getCat(aqi) : { color:'#9ca3af', textClr:'#fff' };
-      return `<div class="sd-item" data-station="${item.uid}" data-name="${item.station?.name || item.station?.url}">
-        <span class="sd-aqi" style="background:${cat.color};color:${cat.textClr}">${fmtAqi(aqi) || '—'}</span>
-        <span>${item.station?.name || 'Unknown'}</span>
+  try {
+    const j = await fetchJsonNoCache(`/api/live/search/${encodeURIComponent(query)}`);
+    if (reqSeq !== searchReqSeq) return;
+    if (j?.status !== 'ok' || !Array.isArray(j?.data)) {
+      renderSearchState('Search is temporarily unavailable.', 'is-error');
+      return;
+    }
+
+    const rows = j.data
+      .map(item => normalizeSearchSuggestion(item, query))
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (!rows.length) {
+      renderSearchState('No matching live stations found.', 'is-empty');
+      return;
+    }
+
+    searchDropdown.innerHTML = rows.map(item => {
+      const badge = Number.isFinite(item.aqi) ? fmtAqi(item.aqi) : '—';
+      return `<div class="sd-item" data-uid="${escapeHtml(item.uid)}" data-name="${escapeHtml(item.stationName)}">
+        <span class="sd-aqi" style="background:${item.cat.color};color:${item.cat.textClr}">${badge}</span>
+        <span class="sd-text">
+          <span class="sd-primary">${escapeHtml(item.primary)}</span>
+          <span class="sd-secondary">${escapeHtml(item.secondary)}</span>
+        </span>
       </div>`;
     }).join('');
 
     searchDropdown.querySelectorAll('.sd-item').forEach(item => {
       item.addEventListener('click', () => {
-        loadCity('@' + item.dataset.station);
+        const uid = String(item.dataset.uid || '').trim();
+        const stationName = String(item.dataset.name || '').trim();
+        loadCity(uid ? `@${uid}` : stationName);
         searchDropdown.classList.remove('show');
-        searchInput.value = '';
+        if (searchInput) searchInput.value = '';
       });
     });
     searchDropdown.classList.add('show');
-  } catch {}
+  } catch {
+    if (reqSeq !== searchReqSeq) return;
+    renderSearchState('Search is temporarily unavailable.', 'is-error');
+  }
 }
 
 /* ── Load city ──────────────────────────────────────────── */
@@ -941,6 +1052,10 @@ async function loadCity(city) {
       return;
     }
     curLiveData = j.data;
+    const resolvedAqi = resolveLiveAqi(j.data, getDisplayedAqiFallback());
+    if (!Number.isFinite(Number(j?.data?.aqi)) && Number.isFinite(resolvedAqi)) {
+      curLiveData.aqi = resolvedAqi;
+    }
     curTimeIso = j.data?.time?.iso || '';
     $('aqiUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
     renderHero(j.data, reqSeq);
@@ -949,7 +1064,7 @@ async function loadCity(city) {
     if (aqiMap && Number.isFinite(liveLat) && Number.isFinite(liveLng)) {
       aqiMap.setView([liveLat, liveLng], Math.max(aqiMap.getZoom(), 10));
     }
-    renderForecast(j.data.forecast, parseInt(j.data.aqi) || 0);
+    renderForecast(j.data.forecast, Number.isFinite(resolvedAqi) ? resolvedAqi : 0);
     loadDonut();
     loadNlpAdvice(j.data, reqSeq);
     loadAreaAqiList(j?.data?.city?.name || city, reqSeq);
@@ -1035,7 +1150,7 @@ async function loadLocalAqi(cityOverride = null, reqSeq = null) {
 
 /* ── Render hero ────────────────────────────────────────── */
 function renderHero(data, reqSeq = null) {
-  const aqi = parseInt(data.aqi) || 0;
+  const aqi = resolveLiveAqi(data, getDisplayedAqiFallback()) ?? getDisplayedAqiFallback();
   const cat = getCat(aqi);
   const loc = parseCityCountry(data.city?.name || curCity, curCity);
   curTimeIso = data?.time?.iso || curTimeIso || '';
@@ -1180,7 +1295,7 @@ async function loadNlpAdvice(sourceData, reqSeq = null) {
     if (isStaleReq(reqSeq)) return;
     const loc = parseCityCountry(sourceData?.city?.name || curCity, curCity);
     const iaqi = sourceData?.iaqi || {};
-    const aqi = Number.parseFloat(sourceData?.aqi);
+    const aqi = resolveLiveAqi(sourceData, getDisplayedAqiFallback());
     const dominant = String(sourceData?.dominentpol || getDominantPollutantFromIaqi(iaqi) || 'pm25').toLowerCase();
 
     const params = new URLSearchParams({

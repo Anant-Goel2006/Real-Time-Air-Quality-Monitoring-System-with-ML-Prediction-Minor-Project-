@@ -247,11 +247,21 @@ button,input,select { font-family:inherit; }
 }
 .search-dropdown.show { display:block; }
 .sd-item {
-  padding:10px 14px; font-size:.82rem; cursor:pointer; display:flex; align-items:center; gap:8px;
+  padding:10px 14px; font-size:.82rem; cursor:pointer; display:flex; align-items:center; gap:10px;
   transition:background var(--transition);
 }
 .sd-item:hover { background:var(--primary-light); }
-.sd-aqi { font-weight:700; font-size:.78rem; padding:2px 8px; border-radius:4px; }
+.sd-aqi { font-weight:700; font-size:.78rem; padding:2px 8px; border-radius:4px; min-width:40px; text-align:center; }
+.sd-text { display:flex; flex-direction:column; line-height:1.2; min-width:0; }
+.sd-primary { font-weight:700; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sd-secondary { font-size:.72rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sd-state {
+  padding:12px 14px;
+  font-size:.78rem;
+  color:var(--text-muted);
+}
+.sd-state.is-loading { color:var(--primary); }
+.sd-state.is-error { color:#cc0033; }
 
 .btn-refresh {
   width:36px; height:36px; border-radius:var(--radius-sm); border:1.5px solid var(--border);
