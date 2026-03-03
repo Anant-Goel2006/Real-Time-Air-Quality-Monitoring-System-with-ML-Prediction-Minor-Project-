@@ -52,3 +52,48 @@ The system is designed as a **final year engineering project** and follows indus
 - Random Forest Regressor
 - Feature Engineering (time-based & interaction features)
 
+---
+
+## 📂 Project Structure
+
+```text
+Air project/
+├── app (1).py                  # Flask backend (live AQI + APIs)
+├── requirements.txt
+├── README.md
+├── ML-Model/                   # Trained ML artifacts
+│   ├── aqi_model_random_forest.pkl
+│   ├── aqi_scaler.pkl
+│   ├── aqi_encoders.pkl
+│   └── air_quality_model_training.ipynb
+├── Sample_Dataset/             # Dataset used by CSV-backed APIs
+│   └── globalAirQuality.csv
+├── templates/                  # HTML pages
+│   ├── index.html
+│   ├── analytics.html
+│   └── predict.html
+└── static/
+    ├── css/style.css
+    ├── js/main.js
+    ├── js/analytics.js
+    ├── js/predict.js
+    └── assets/hero/
+```
+
+---
+
+## ▶️ Run Locally
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Start the server:
+   ```bash
+   python "app (1).py"
+   ```
+3. Open:
+   - `http://127.0.0.1:8080/`
+   - `http://127.0.0.1:8080/analytics`
+   - `http://127.0.0.1:8080/predict`
+
