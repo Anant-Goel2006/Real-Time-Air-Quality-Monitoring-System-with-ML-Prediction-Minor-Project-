@@ -3,9 +3,9 @@ import joblib
 from backend.app.config import CATS
 from backend.app.utils import get_category
 
-# Base paths relative to backend directory or absolute if defined
+# Base paths relative to project root (2 levels up from backend/app/services/)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ML_DIR = os.path.join(BASE_DIR, "ML-Model")
+ML_DIR = os.path.join(BASE_DIR, "models")
 
 model = None
 scaler = None

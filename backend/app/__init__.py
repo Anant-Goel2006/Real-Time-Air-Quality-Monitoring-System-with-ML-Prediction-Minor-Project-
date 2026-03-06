@@ -43,10 +43,10 @@ def create_app():
     app.register_blueprint(ml_bp, url_prefix="/api")
     app.register_blueprint(views_bp)
     
-    # Root-level static asset route that previously existed for raw file fetching
-    @app.route("/Sample_Dataset/<path:filename>")
+    # Route to serve the dataset CSV if needed
+    @app.route("/data/<path:filename>")
     def download_dataset(filename):
-        dataset_dir = os.path.join(base_dir, "Sample_Dataset")
+        dataset_dir = os.path.join(base_dir, "data")
         return send_from_directory(dataset_dir, filename)
         
     return app

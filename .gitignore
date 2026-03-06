@@ -1,17 +1,50 @@
-# Python cache and bytecode
+# ── Python ───────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+.Python
 
-# Virtual environments
+# ── Virtual environments ─────────────────────────────────────
 .venv/
 venv/
 env/
+ENV/
 
-# Local environment and logs
+# ── Environment & Secrets (NEVER commit these) ───────────────
 .env
+# .env.example is safe to commit (no real secrets)
+
+# ── Logs & temporary output files ────────────────────────────
 *.log
+*.txt
+!requirements.txt
+!README.txt
 app_output.txt
 app_live.log
+err.txt
+out.txt
+error.txt
+server_*.log
+
+# ── OS & Editor noise ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── Testing & coverage ───────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Build artifacts ──────────────────────────────────────────
+dist/
+build/
+*.egg-info/
 
 # OS/editor noise
 .DS_Store

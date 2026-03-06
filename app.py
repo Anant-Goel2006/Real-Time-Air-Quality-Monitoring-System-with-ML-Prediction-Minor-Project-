@@ -791,7 +791,7 @@ def initialize():
     base_dir = os.path.dirname(__file__)
     csv_path = first_existing_path([
         os.path.join(base_dir, "globalAirQuality.csv"),
-        os.path.join(base_dir, "Sample_Dataset", "globalAirQuality.csv"),
+        os.path.join(base_dir, "data", "globalAirQuality.csv"),
     ])
     if csv_path:
         try:
@@ -802,7 +802,7 @@ def initialize():
         except Exception as e:
             print(f"✗ Dataset error: {e}"); df = None
     else:
-        print("✗ globalAirQuality.csv not found in project root or Sample_Dataset/")
+        print("✗ globalAirQuality.csv not found in project root or data/")
 
     try:
         import joblib
@@ -813,13 +813,13 @@ def initialize():
         ]:
             path = first_existing_path([
                 os.path.join(base_dir, fname),
-                os.path.join(base_dir, "ML-Model", fname),
+                os.path.join(base_dir, "models", fname),
             ])
             if path:
                 globals()[var_name] = joblib.load(path)
                 print(f"✓ Loaded: {fname} ({path})")
             else:
-                print(f"⚠ Missing: {fname} (checked root + ML-Model/)")
+                print(f"⚠ Missing: {fname} (checked root + models/)")
     except Exception as e:
         print(f"⚠ ML models unavailable: {e}")
 
